@@ -5,10 +5,12 @@
 #' call parenthesis).
 #'
 #' @inheritParams r_list
+#' @param geo A logical which on TRUE, denoted that geographies need to be fetched from HITL entities
 #' @param \ldots A set of optionally named arguments.  Using \pkg{wakefield}
 #' variable functions require no name or call parenthesis.
 #' @param rep.sep A separator to use for repeated variable names.  For example
 #' if the \code{\link[wakefield]{age}} is used three times
+#' @param entity_name A string which defines the entity name to be fetched from HITL, when geo = TRUE
 #' (\code{r_data_frame(age, age, age)}), the name "Age" will be assigned to all
 #' three columns.  The results in column names \code{c("Age_1", "Age_2", "Age_3")}.
 #' To turn of this behavior use  \code{rep.sep = NULL}.  This results in
@@ -90,15 +92,58 @@
 #'    r_na() %>%
 #'    peek %>%
 #'    plot(palette = "Set1")
+
+library(httr)
+library(jsonlite)
+
 r_data_frame <-
-function (n, ..., rep.sep = "_") {
+function (n, geo = F,..., rep.sep = "_",entity_name = NA) {
+  
+  if(geo ==  F){
+    print("1")
+    ll <- as.list(substitute(list(...)))[-1]
+    print(ll)
     out <- r_list(n = n, ..., rep.sep = rep.sep)
-
     nms <- get_names(out, rep.sep)
-
     out <- stats::setNames(data.frame(out, stringsAsFactors = FALSE,
         check.names = FALSE), nms)
-    dplyr::tbl_df(out)
+    return(dplyr::tbl_df(out))
+    }
+  
+  if(geo == T){
+    if (missing(entity_name)) stop("Provide Entity Name")
+    
+    possibleError <- tryCatch(
+      httr::set_config(httr::config(ssl_verifypeer = 0L)),
+      error=function(e) e
+    )
+    if(!inherits(possibleError, "error")){
+      httr::set_config(httr::config(ssl_verifypeer = 0L))
+    }
+    result <- (GET(paste0("http://13.126.115.213/entity/get_entity_list?name=",entity_name,"& *contextid=true"), authenticate("admin", "clean4india")))
+    if(grepl("^5",result$status_code)){
+      stop(print("Error 500: Server Side Error"))
+    } else if(grepl("^4",result$status_code)){
+      stop(print("Error 500: Client Side Error"))
+    } else{
+      print("Data from server stored")
+    }
+  
+    column_names <- (content(result))$colnames
+    entity_df = as.data.frame(fromJSON(rawToChar(result$content))$result)
+    colnames(entity_df) <- column_names
+    
+    num_rows <- nrow(entity_df)
+    
+    out <- r_list(n = num_rows, ..., rep.sep = rep.sep)
+    nms <- get_names(out, rep.sep)
+    out <- stats::setNames(data.frame(out, stringsAsFactors = FALSE,
+                                      check.names = FALSE), nms)
+    
+    out <- dplyr::tbl_df(out)
+    out <- cbind(entity_df,out)
+    return(out)
+  }
 }
 
 
